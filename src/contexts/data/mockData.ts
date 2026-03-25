@@ -22,6 +22,7 @@ export interface Alert {
   subscriptionName: string;
   renewalDate: string;
   amount: number;
+  currency?: string;
   daysUntilRenewal: number;
   reminderEnabled: boolean;
   reminderDaysBefore: number;

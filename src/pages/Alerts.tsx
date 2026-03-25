@@ -19,10 +19,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { alerts as initialAlerts, type Alert as AlertType } from "@/data/mockData";
+import { alerts as initialAlerts, type Alert as AlertType } from "@/contexts/data/mockData";
+import { useCurrency } from "../hooks/useCurrency";
 
 export default function Alerts() {
   const [alertsList, setAlertsList] = useState<AlertType[]>(initialAlerts);
+  const { format, convert } = useCurrency();
 
   const urgentAlerts = alertsList.filter((a) => a.daysUntilRenewal <= 3);
   const upcomingAlerts = alertsList.filter(
@@ -77,8 +79,8 @@ export default function Alerts() {
                   {alert.daysUntilRenewal === 0
                     ? "Today"
                     : alert.daysUntilRenewal === 1
-                    ? "Tomorrow"
-                    : `${alert.daysUntilRenewal} days`}
+                      ? "Tomorrow"
+                      : `${alert.daysUntilRenewal} days`}
                 </Badge>
               </AlertTitle>
               <AlertDescription>
@@ -87,7 +89,7 @@ export default function Alerts() {
                   day: "numeric",
                   month: "long",
                 })}{" "}
-                for ₹{alert.amount.toLocaleString("en-IN")}
+                for {format(convert(alert.amount, alert.currency || "INR"))}
               </AlertDescription>
             </Alert>
           ))}
@@ -163,7 +165,7 @@ export default function Alerts() {
                       year: "numeric",
                     })}
                   </TableCell>
-                  <TableCell>₹{alert.amount.toLocaleString("en-IN")}</TableCell>
+                  <TableCell>{format(convert(alert.amount, alert.currency || "INR"))}</TableCell>
                   <TableCell>
                     <Badge className={getDaysColor(alert.daysUntilRenewal)} variant="outline">
                       {alert.daysUntilRenewal} days

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { User, CreditCard, Bell, LogOut, Save } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,22 +14,118 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "../contexts/AuthContext";
+import { useCurrency } from "../hooks/useCurrency";
 
 export default function Settings() {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const { user, updateUser, logout } = useAuth();
+  const { symbol } = useCurrency();
+
   const [profile, setProfile] = useState({
-    name: "Rahul Kumar",
-    email: "rahul.kumar@example.com",
-    phone: "+91 98765 43210",
+    name: user?.name || "",
+    email: user?.email || "",
+    phone: user?.phone || "",
   });
 
   const [preferences, setPreferences] = useState({
-    currency: "INR",
-    monthlyBudget: "20000",
-    emailReminders: true,
-    pushNotifications: true,
-    weeklyReport: false,
-    reminderDays: "3",
+    currency: user?.currency || "INR",
+    monthlyBudget: user?.monthlyBudget?.toString() || "20000",
+    emailReminders: user?.emailReminders ?? true,
+    pushNotifications: user?.pushNotifications ?? true,
+    weeklyReport: user?.weeklyReport ?? false,
+    reminderDays: user?.reminderDays?.toString() || "3",
   });
+
+  // Update local state when user data changes (e.g., after login or refresh)
+  useEffect(() => {
+    if (user) {
+      setProfile({
+        name: user.name,
+        email: user.email,
+        phone: user.phone || "",
+      });
+      setPreferences({
+        currency: user.currency || "INR",
+        monthlyBudget: user.monthlyBudget?.toString() || "20000",
+        emailReminders: user.emailReminders ?? true,
+        pushNotifications: user.pushNotifications ?? true,
+        weeklyReport: user.weeklyReport ?? false,
+        reminderDays: user.reminderDays?.toString() || "3",
+      });
+    }
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    const success = await updateUser({
+      name: profile.name,
+      email: profile.email,
+      phone: profile.phone,
+    });
+
+    if (success) {
+      toast({
+        title: "Profile Updated",
+        description: "Your personal information has been saved successfully.",
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Update Failed",
+        description: "There was an error saving your profile information.",
+      });
+    }
+  };
+
+  const handleSaveBudget = async () => {
+    const success = await updateUser({
+      currency: preferences.currency,
+      monthlyBudget: parseFloat(preferences.monthlyBudget),
+      reminderDays: parseInt(preferences.reminderDays),
+    });
+
+    if (success) {
+      toast({
+        title: "Budget Updated",
+        description: "Your financial preferences have been saved.",
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Update Failed",
+        description: "There was an error saving your budget settings.",
+      });
+    }
+  };
+
+  const handleSaveNotifications = async (updates: Partial<typeof preferences>) => {
+    const success = await updateUser({
+      emailReminders: updates.emailReminders ?? preferences.emailReminders,
+      pushNotifications: updates.pushNotifications ?? preferences.pushNotifications,
+      weeklyReport: updates.weeklyReport ?? preferences.weeklyReport,
+    });
+
+    if (success) {
+      setPreferences({ ...preferences, ...updates });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Update Failed",
+        description: "There was an error saving your notification preferences.",
+      });
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    toast({
+      title: "Logged Out",
+      description: "You have been successfully logged out.",
+    });
+    navigate("/login");
+  };
 
   return (
     <div className="space-y-6">
@@ -77,7 +173,7 @@ export default function Settings() {
                 onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
               />
             </div>
-            <Button className="w-full">
+            <Button className="w-full" onClick={handleSaveProfile}>
               <Save className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -117,7 +213,7 @@ export default function Settings() {
               <Label htmlFor="budget">Monthly Budget</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                  ₹
+                  {symbol}
                 </span>
                 <Input
                   id="budget"
@@ -150,7 +246,7 @@ export default function Settings() {
                 </SelectContent>
               </Select>
             </div>
-            <Button className="w-full">
+            <Button className="w-full" onClick={handleSaveBudget}>
               <Save className="mr-2 h-4 w-4" />
               Save Budget
             </Button>
@@ -178,7 +274,7 @@ export default function Settings() {
             <Switch
               checked={preferences.emailReminders}
               onCheckedChange={(checked) =>
-                setPreferences({ ...preferences, emailReminders: checked })
+                handleSaveNotifications({ emailReminders: checked })
               }
             />
           </div>
@@ -193,7 +289,7 @@ export default function Settings() {
             <Switch
               checked={preferences.pushNotifications}
               onCheckedChange={(checked) =>
-                setPreferences({ ...preferences, pushNotifications: checked })
+                handleSaveNotifications({ pushNotifications: checked })
               }
             />
           </div>
@@ -208,7 +304,7 @@ export default function Settings() {
             <Switch
               checked={preferences.weeklyReport}
               onCheckedChange={(checked) =>
-                setPreferences({ ...preferences, weeklyReport: checked })
+                handleSaveNotifications({ weeklyReport: checked })
               }
             />
           </div>
@@ -224,11 +320,9 @@ export default function Settings() {
               Sign out of your FinCockpit account
             </p>
           </div>
-          <Button variant="destructive" asChild>
-            <Link to="/login">
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
-            </Link>
+          <Button variant="destructive" onClick={handleLogout}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Logout
           </Button>
         </CardContent>
       </Card>

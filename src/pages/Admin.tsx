@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { categories as initialCategories } from "@/data/mockData";
+import { categories as initialCategories } from "@/contexts/data/mockData";
 
 export default function Admin() {
   const [categories, setCategories] = useState(initialCategories);

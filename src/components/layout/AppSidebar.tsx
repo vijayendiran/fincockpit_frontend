@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Wallet,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ const navItems = [
   { title: "Expenses", path: "/expenses", icon: Receipt },
   { title: "Analytics", path: "/analytics", icon: BarChart3 },
   { title: "Alerts", path: "/alerts", icon: Bell },
+  { title: "Goal Planner", path: "/goal-planner", icon: Target },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 

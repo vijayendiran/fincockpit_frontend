@@ -1,30 +1,114 @@
+import { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, PieChart, BarChart3, Lightbulb } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { chartData, summaryData } from "@/data/mockData";
+import { useAuth } from "../contexts/AuthContext";
+import { useCurrency } from "../hooks/useCurrency";
 
 export default function Analytics() {
+  const { token, user } = useAuth();
+  const { format, convert, symbol } = useCurrency();
+  const [isLoading, setIsLoading] = useState(true);
+  const [summaryData, setSummaryData] = useState({
+    totalMonthlySpend: 0,
+    subscriptionSpend: 0,
+    expenseSpend: 0,
+    monthlyBudget: user?.monthlyBudget || 20000,
+    remainingBudget: 0,
+  });
+
+  const [chartData, setChartData] = useState({
+    monthlyTrend: [] as { month: string; amount: number }[],
+    categoryBreakdown: [] as { category: string; amount: number; percentage: number }[],
+  });
+
+  const [subAnalysis, setSubAnalysis] = useState({
+    subscriptionTotal: 0,
+    oneTimeTotal: 0,
+    subscriptionPercentage: 0
+  });
+
+  useEffect(() => {
+    const fetchAnalytics = async () => {
+      try {
+        const headers = { Authorization: `Bearer ${token}` };
+        const [summaryRes, trendRes, categoryRes, subAnalysisRes] = await Promise.all([
+          fetch('/api/analytics/summary', { headers }),
+          fetch('/api/analytics/monthly-trend', { headers }),
+          fetch('/api/analytics/expenses-by-category', { headers }),
+          fetch('/api/analytics/subscription-analysis', { headers }),
+        ]);
+
+        const summaryJson = await summaryRes.json();
+        const trendJson = await trendRes.json();
+        const categoryJson = await categoryRes.json();
+        const subAnalysisJson = await subAnalysisRes.json();
+
+        if (summaryJson.success) {
+          const totalMonthlySpend = summaryJson.data.totalExpenses + summaryJson.data.monthlySubscriptionCost;
+          const currentBudget = user?.monthlyBudget || 20000;
+          setSummaryData({
+            totalMonthlySpend,
+            subscriptionSpend: summaryJson.data.monthlySubscriptionCost,
+            expenseSpend: summaryJson.data.totalExpenses,
+            monthlyBudget: currentBudget,
+            remainingBudget: Math.max(0, currentBudget - totalMonthlySpend),
+          });
+        }
+
+        if (trendJson.success) {
+          setChartData(prev => ({ ...prev, monthlyTrend: trendJson.data.map((item: any) => ({ month: item.month, amount: item.expenses })) }));
+        }
+
+        if (categoryJson.success) {
+          setChartData(prev => ({ ...prev, categoryBreakdown: categoryJson.data.map((item: any) => ({ category: item.categoryName || 'Unknown', amount: item.total, percentage: item.percentage })) }));
+        }
+
+        if (subAnalysisJson.success) {
+          const subTotal = subAnalysisJson.data.subscriptions.monthlyTotal;
+          const oneTimeTotal = subAnalysisJson.data.oneTimeExpenses.total;
+          const total = subTotal + oneTimeTotal;
+          setSubAnalysis({
+            subscriptionTotal: subTotal,
+            oneTimeTotal: oneTimeTotal,
+            subscriptionPercentage: total > 0 ? Math.round((subTotal / total) * 100) : 0
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch analytics:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (token) fetchAnalytics();
+  }, [token, user]);
+
   const insights = [
     {
       type: "success" as const,
-      title: "Great job!",
-      description: "Your spending is 12% lower than last month. Keep it up!",
-      icon: TrendingDown,
-    },
-    {
-      type: "warning" as const,
-      title: "Entertainment spending up",
-      description: "You spent ₹1,947 on entertainment this month, 15% more than your average.",
-      icon: TrendingUp,
+      title: "Budget Status",
+      description: summaryData.totalMonthlySpend <= summaryData.monthlyBudget
+        ? `You are within your budget! Remaining: ${format(convert(summaryData.remainingBudget, "INR"))}`
+        : `You have exceeded your budget by ${format(convert(summaryData.totalMonthlySpend - summaryData.monthlyBudget, "INR"))}`,
+      icon: summaryData.totalMonthlySpend <= summaryData.monthlyBudget ? TrendingDown : TrendingUp,
     },
     {
       type: "info" as const,
-      title: "Subscription tip",
-      description: "Consider switching to yearly plans for Netflix and Spotify to save ₹1,200/year.",
+      title: "Subscription Impact",
+      description: `Subscriptions make up ${subAnalysis.subscriptionPercentage}% of your current monthly spending.`,
       icon: Lightbulb,
     },
   ];
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -48,7 +132,7 @@ export default function Analytics() {
               </Badge>
             </div>
             <p className="mt-2 text-2xl font-bold text-foreground">
-              ₹{summaryData.totalMonthlySpend.toLocaleString("en-IN")}
+              {format(convert(summaryData.totalMonthlySpend, "INR"))}
             </p>
           </CardContent>
         </Card>
@@ -56,7 +140,7 @@ export default function Analytics() {
           <CardContent className="p-6">
             <p className="text-sm text-muted-foreground">Avg. Daily Spend</p>
             <p className="mt-2 text-2xl font-bold text-foreground">
-              ₹{Math.round(summaryData.totalMonthlySpend / 30).toLocaleString("en-IN")}
+              {format(convert(Math.round(summaryData.totalMonthlySpend / 30), "INR"))}
             </p>
           </CardContent>
         </Card>
@@ -64,7 +148,7 @@ export default function Analytics() {
           <CardContent className="p-6">
             <p className="text-sm text-muted-foreground">Subscriptions</p>
             <p className="mt-2 text-2xl font-bold text-foreground">
-              {Math.round((summaryData.subscriptionSpend / summaryData.totalMonthlySpend) * 100)}%
+              {subAnalysis.subscriptionPercentage}%
             </p>
             <p className="text-xs text-muted-foreground">of total spending</p>
           </CardContent>
@@ -73,13 +157,13 @@ export default function Analytics() {
           <CardContent className="p-6">
             <p className="text-sm text-muted-foreground">Budget Used</p>
             <p className="mt-2 text-2xl font-bold text-foreground">
-              {Math.round(((summaryData.monthlyBudget - summaryData.remainingBudget) / summaryData.monthlyBudget) * 100)}%
+              {Math.min(100, Math.round((summaryData.totalMonthlySpend / summaryData.monthlyBudget) * 100))}%
             </p>
             <div className="mt-2 h-2 w-full rounded-full bg-muted">
               <div
                 className="h-2 rounded-full bg-primary"
                 style={{
-                  width: `${((summaryData.monthlyBudget - summaryData.remainingBudget) / summaryData.monthlyBudget) * 100}%`,
+                  width: `${Math.min(100, (summaryData.totalMonthlySpend / summaryData.monthlyBudget) * 100)}%`,
                 }}
               />
             </div>
@@ -100,12 +184,12 @@ export default function Analytics() {
               {chartData.monthlyTrend.map((item, index) => (
                 <div key={item.month} className="flex flex-1 flex-col items-center gap-2">
                   <span className="text-xs font-medium text-foreground">
-                    ₹{(item.amount / 1000).toFixed(1)}k
+                    {symbol}{(convert(item.amount, "INR") / 1000).toFixed(1)}k
                   </span>
                   <div
                     className="w-full rounded-t-md bg-primary transition-all hover:bg-primary/80"
                     style={{
-                      height: `${(item.amount / 20000) * 180}px`,
+                      height: `${(item.amount / summaryData.monthlyBudget) * 180}px`,
                       opacity: index === chartData.monthlyTrend.length - 1 ? 1 : 0.6,
                     }}
                   />
@@ -137,7 +221,7 @@ export default function Analytics() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-foreground">
-                      ₹{item.amount.toLocaleString("en-IN")}
+                      {format(convert(item.amount, "INR"))}
                     </span>
                     <Badge variant="outline" className="text-xs">
                       {item.percentage}%
@@ -183,12 +267,12 @@ export default function Analytics() {
                   fill="none"
                   stroke="hsl(var(--primary))"
                   strokeWidth="12"
-                  strokeDasharray={`${(summaryData.subscriptionSpend / summaryData.totalMonthlySpend) * 251.2} 251.2`}
+                  strokeDasharray={`${(subAnalysis.subscriptionTotal / summaryData.totalMonthlySpend || 0) * 251.2} 251.2`}
                 />
               </svg>
               <div className="absolute text-center">
                 <p className="text-3xl font-bold text-foreground">
-                  {Math.round((summaryData.subscriptionSpend / summaryData.totalMonthlySpend) * 100)}%
+                  {subAnalysis.subscriptionPercentage}%
                 </p>
                 <p className="text-xs text-muted-foreground">Subscriptions</p>
               </div>
@@ -200,7 +284,7 @@ export default function Analytics() {
                   <span className="font-medium text-foreground">Subscriptions</span>
                 </div>
                 <span className="text-lg font-bold text-foreground">
-                  ₹{summaryData.subscriptionSpend.toLocaleString("en-IN")}
+                  {format(convert(subAnalysis.subscriptionTotal, "INR"))}
                 </span>
               </div>
               <div className="flex items-center justify-between rounded-lg border border-border p-4">
@@ -209,7 +293,7 @@ export default function Analytics() {
                   <span className="font-medium text-foreground">Other Expenses</span>
                 </div>
                 <span className="text-lg font-bold text-foreground">
-                  ₹{summaryData.expenseSpend.toLocaleString("en-IN")}
+                  {format(convert(subAnalysis.oneTimeTotal, "INR"))}
                 </span>
               </div>
             </div>
@@ -224,7 +308,7 @@ export default function Analytics() {
         </CardHeader>
         <CardContent className="space-y-4">
           {insights.map((insight, index) => (
-            <Alert key={index} variant={insight.type === "warning" ? "destructive" : "default"}>
+            <Alert key={index} variant={insight.type === "success" ? "default" : "default"}>
               <insight.icon className="h-4 w-4" />
               <AlertTitle>{insight.title}</AlertTitle>
               <AlertDescription>{insight.description}</AlertDescription>

@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import {
   TrendingUp,
@@ -12,13 +13,111 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { subscriptions, summaryData, chartData } from "@/data/mockData";
+import { useAuth } from "../contexts/AuthContext";
+import { useCurrency } from "../hooks/useCurrency";
+import { AnomalyCard } from "../components/AnomalyCard";
+import { SavingsSuggestions } from "../components/SavingsSuggestions";
+import { ForecastCard } from "../components/ForecastCard";
+import { NLPExpenseInput } from "../components/NLPExpenseInput";
+
+interface Subscription {
+  id: string;
+  name: string;
+  amount: number;
+  currency?: string;
+  renewalDate: string;
+  status: string;
+}
 
 export default function Dashboard() {
+  const { token, user } = useAuth();
+  const { format, convert } = useCurrency();
+
+  const [summaryData, setSummaryData] = useState({
+    totalMonthlySpend: 0,
+    subscriptionSpend: 0,
+    expenseSpend: 0,
+    remainingBudget: 0,
+    monthlyBudget: user?.monthlyBudget || 20000,
+  });
+
+  const [chartData, setChartData] = useState({
+    monthlyTrend: [] as { month: string; amount: number }[],
+    categoryBreakdown: [] as { category: string; amount: number; percentage: number }[],
+  });
+
+   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+   const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
+   const [isLoading, setIsLoading] = useState(true);
+
+  const fetchDashboardData = async () => {
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const [summaryRes, trendRes, categoryRes, subsRes, allCatsRes] = await Promise.all([
+        fetch('/api/analytics/summary', { headers }),
+        fetch('/api/analytics/monthly-trend', { headers }),
+        fetch('/api/analytics/expenses-by-category', { headers }),
+        fetch('/api/subscriptions', { headers }),
+        fetch('/api/categories', { headers })
+      ]);
+
+      const summaryJson = await summaryRes.json();
+      const trendJson = await trendRes.json();
+      const categoryJson = await categoryRes.json();
+      const subsJson = await subsRes.json();
+      const allCatsJson = await allCatsRes.json();
+
+      if (summaryJson.success) {
+        const totalMonthlySpend = summaryJson.data.totalExpenses + summaryJson.data.monthlySubscriptionCost;
+        const currentBudget = user?.monthlyBudget || 20000;
+        setSummaryData({
+          totalMonthlySpend,
+          subscriptionSpend: summaryJson.data.monthlySubscriptionCost,
+          expenseSpend: summaryJson.data.totalExpenses,
+          remainingBudget: Math.max(0, currentBudget - totalMonthlySpend),
+          monthlyBudget: currentBudget
+        });
+      }
+
+      if (trendJson.success) {
+        setChartData(prev => ({ ...prev, monthlyTrend: trendJson.data.map((item: any) => ({ month: item.month, amount: item.expenses })) }));
+      }
+
+      if (categoryJson.success) {
+        setChartData(prev => ({ ...prev, categoryBreakdown: categoryJson.data.map((item: any) => ({ category: item.categoryName || 'Unknown', amount: item.total, percentage: item.percentage })) }));
+      }
+
+      if (subsJson.success) {
+        setSubscriptions(subsJson.data.subscriptions || []);
+      }
+
+      if (allCatsJson.success) {
+        setAllCategories(allCatsJson.data.categories || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token) fetchDashboardData();
+  }, [token]);
+
   const upcomingRenewals = subscriptions
     .filter((sub) => sub.status === "active")
     .sort((a, b) => new Date(a.renewalDate).getTime() - new Date(b.renewalDate).getTime())
     .slice(0, 4);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -62,7 +161,7 @@ export default function Dashboard() {
             <div className="mt-4">
               <p className="text-sm text-muted-foreground">Total Monthly Spend</p>
               <p className="text-2xl font-bold text-foreground">
-                ₹{summaryData.totalMonthlySpend.toLocaleString("en-IN")}
+                {format(convert(summaryData.totalMonthlySpend, "INR"))}
               </p>
             </div>
           </CardContent>
@@ -79,7 +178,7 @@ export default function Dashboard() {
             <div className="mt-4">
               <p className="text-sm text-muted-foreground">Subscription Spend</p>
               <p className="text-2xl font-bold text-foreground">
-                ₹{summaryData.subscriptionSpend.toLocaleString("en-IN")}
+                {format(convert(summaryData.subscriptionSpend, "INR"))}
               </p>
             </div>
           </CardContent>
@@ -99,7 +198,7 @@ export default function Dashboard() {
             <div className="mt-4">
               <p className="text-sm text-muted-foreground">Other Expenses</p>
               <p className="text-2xl font-bold text-foreground">
-                ₹{summaryData.expenseSpend.toLocaleString("en-IN")}
+                {format(convert(summaryData.expenseSpend, "INR"))}
               </p>
             </div>
           </CardContent>
@@ -118,11 +217,22 @@ export default function Dashboard() {
             <div className="mt-4">
               <p className="text-sm text-muted-foreground">Remaining Budget</p>
               <p className="text-2xl font-bold text-foreground">
-                ₹{summaryData.remainingBudget.toLocaleString("en-IN")}
+                {format(convert(summaryData.remainingBudget, "INR"))}
               </p>
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* AI Spending Insights & Savings */}
+      <div className="flex flex-col gap-6">
+        <NLPExpenseInput 
+          onExpenseAdded={fetchDashboardData} 
+          allCategories={allCategories} 
+        />
+        <AnomalyCard />
+        <SavingsSuggestions />
+        <ForecastCard />
       </div>
 
       {/* Charts and Renewals */}
@@ -134,18 +244,21 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="flex h-64 items-end justify-between gap-2">
-              {chartData.monthlyTrend.map((item, index) => (
-                <div key={item.month} className="flex flex-1 flex-col items-center gap-2">
-                  <div
-                    className="w-full rounded-t-md bg-primary transition-all hover:bg-primary/80"
-                    style={{
-                      height: `${(item.amount / 20000) * 200}px`,
-                      opacity: index === chartData.monthlyTrend.length - 1 ? 1 : 0.6,
-                    }}
-                  />
-                  <span className="text-xs text-muted-foreground">{item.month}</span>
-                </div>
-              ))}
+              {chartData.monthlyTrend.map((item, index) => {
+                const maxAmount = Math.max(...chartData.monthlyTrend.map(i => i.amount), summaryData.monthlyBudget, 1);
+                return (
+                  <div key={item.month} className="flex flex-1 flex-col items-center gap-2">
+                    <div
+                      className="w-full rounded-t-md bg-primary transition-all hover:bg-primary/80"
+                      style={{
+                        height: `${(item.amount / maxAmount) * 200}px`,
+                        opacity: index === chartData.monthlyTrend.length - 1 ? 1 : 0.6,
+                      }}
+                    />
+                    <span className="text-xs text-muted-foreground">{item.month}</span>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -159,6 +272,9 @@ export default function Dashboard() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">
+            {upcomingRenewals.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No upcoming renewals</p>
+            )}
             {upcomingRenewals.map((sub) => (
               <div
                 key={sub.id}
@@ -175,7 +291,7 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <p className="font-semibold text-foreground">
-                  ₹{sub.amount.toLocaleString("en-IN")}
+                  {format(convert(sub.amount, sub.currency || "INR"))}
                 </p>
               </div>
             ))}
@@ -195,7 +311,7 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-foreground">{item.category}</span>
                   <span className="font-medium text-foreground">
-                    ₹{item.amount.toLocaleString("en-IN")}
+                    {format(convert(item.amount, "INR"))}
                   </span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-muted">

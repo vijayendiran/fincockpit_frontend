@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Plus, Search, Filter, Receipt, TrendingUp } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus, Search, Filter, Receipt, TrendingUp, MoreVertical, Edit, Trash2 } from "lucide-react";
+import { NLPExpenseInput } from "@/components/NLPExpenseInput";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,27 +31,50 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { expenses as initialExpenses, categories, type Expense } from "@/data/mockData";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useAuth } from "../contexts/AuthContext";
+import { useCurrency, CURRENCY_SYMBOLS } from "../hooks/useCurrency";
+
+export interface Expense {
+  id: string;
+  date: string;
+  category: string;
+  amount: number;
+  notes: string;
+  currency: string;
+}
 
 const months = [
   "All Months",
-  "January 2025",
-  "December 2024",
-  "November 2024",
+  ...Array.from({ length: 12 }, (_, i) => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    return d.toLocaleString("en-IN", { month: "long", year: "numeric" });
+  })
 ];
 
 export default function Expenses() {
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
+  const { token } = useAuth();
+  const { format, convert, symbol, currencies, baseCurrency } = useCurrency();
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [allCategories, setAllCategories] = useState<{ id: string, name: string }[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("All Months");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     date: "",
     category: "",
     amount: "",
     notes: "",
+    currency: baseCurrency,
   });
 
   const filteredExpenses = expenses.filter((expense) => {
@@ -59,26 +83,140 @@ export default function Expenses() {
     return matchesSearch && matchesCategory;
   });
 
-  const totalExpenses = filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const totalExpenses = filteredExpenses.reduce((sum, exp) => sum + convert(exp.amount, exp.currency), 0);
 
   const categoryTotals = filteredExpenses.reduce((acc, exp) => {
-    acc[exp.category] = (acc[exp.category] || 0) + exp.amount;
+    acc[exp.category] = (acc[exp.category] || 0) + convert(exp.amount, exp.currency);
     return acc;
   }, {} as Record<string, number>);
 
   const highestCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const fetchExpenses = async () => {
+    try {
+      const response = await fetch('/api/expenses', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await response.json();
+      if (json.success) {
+        setExpenses(json.data.expenses.map((e: any) => ({
+          id: e.id,
+          date: e.date,
+          category: e.category?.name || 'Other',
+          amount: e.amount,
+          notes: e.description || e.title,
+          currency: e.currency || "INR"
+        })));
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const response = await fetch('/api/categories?type=expense', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await response.json();
+      if (json.success) setAllCategories(json.data.categories);
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchExpenses();
+      fetchCategories();
+    }
+  }, [token]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newExpense: Expense = {
-      id: Date.now().toString(),
-      date: formData.date,
-      category: formData.category,
-      amount: parseFloat(formData.amount),
-      notes: formData.notes,
-    };
-    setExpenses([newExpense, ...expenses]);
-    resetForm();
+
+    // Find or create category
+    let matchedCat = allCategories.find(c => c.name === formData.category);
+    let categoryId = matchedCat?.id;
+
+    if (!categoryId) {
+      const catRes = await fetch('/api/categories', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ name: formData.category, type: 'expense' })
+      });
+      const catJson = await catRes.json();
+      if (catJson.success) {
+        categoryId = catJson.data.category.id;
+        setAllCategories([...allCategories, catJson.data.category]);
+      } else {
+        alert("Failed to create category");
+        return;
+      }
+    }
+
+    try {
+      const url = editingExpenseId ? `/api/expenses/${editingExpenseId}` : '/api/expenses';
+      const method = editingExpenseId ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: formData.notes || 'Expense',
+          description: formData.notes,
+          amount: parseFloat(formData.amount),
+          categoryId: categoryId,
+          date: formData.date,
+          currency: formData.currency
+        })
+      });
+
+      const json = await response.json();
+      if (json.success) {
+        fetchExpenses();
+        resetForm();
+      } else {
+        alert(json.message || "Failed to save expense");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleEdit = (expense: Expense) => {
+    setEditingExpenseId(expense.id);
+    
+    // Convert YYYY-MM-DD to date input format (already is)
+    // Find category ID since we need it for the form?
+    // Wait, formData.category is the NAME here.
+    setFormData({
+      date: new Date(expense.date).toISOString().split('T')[0],
+      category: expense.category,
+      amount: expense.amount.toString(),
+      notes: expense.notes,
+      currency: (expense as any).currency || "INR"
+    });
+    setIsAddDialogOpen(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this expense?")) return;
+
+    try {
+      const response = await fetch(`/api/expenses/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await response.json();
+      if (json.success) {
+        setExpenses(expenses.filter(e => e.id !== id));
+      } else {
+        alert(json.message || "Failed to delete");
+      }
+    } catch (err) { console.error(err); }
   };
 
   const resetForm = () => {
@@ -87,7 +225,9 @@ export default function Expenses() {
       category: "",
       amount: "",
       notes: "",
+      currency: baseCurrency,
     });
+    setEditingExpenseId(null);
     setIsAddDialogOpen(false);
   };
 
@@ -103,16 +243,16 @@ export default function Expenses() {
         </div>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={() => resetForm()}>
               <Plus className="mr-2 h-4 w-4" />
               Add Expense
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add New Expense</DialogTitle>
+              <DialogTitle>{editingExpenseId ? 'Edit Expense' : 'Add New Expense'}</DialogTitle>
               <DialogDescription>
-                Record a new expense to track your spending
+                {editingExpenseId ? 'Update the details of your expense' : 'Record a new expense to track your spending'}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -136,24 +276,44 @@ export default function Expenses() {
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat} value={cat}>
-                        {cat}
+                    {allCategories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.name}>
+                        {cat.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="amount">Amount (₹)</Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  placeholder="0.00"
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  required
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="currency">Currency</Label>
+                  <Select
+                    value={formData.currency}
+                    onValueChange={(value) => setFormData({ ...formData, currency: value })}
+                  >
+                    <SelectTrigger id="currency">
+                      <SelectValue placeholder="Select currency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currencies.map((c: string) => (
+                        <SelectItem key={c} value={c}>
+                          {CURRENCY_SYMBOLS[c] || ""} {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount</Label>
+                  <Input
+                    id="amount"
+                    type="number"
+                    placeholder="0.00"
+                    value={formData.amount}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="notes">Notes</Label>
@@ -175,6 +335,9 @@ export default function Expenses() {
         </Dialog>
       </div>
 
+      {/* Magic AI Entry */}
+      <NLPExpenseInput onExpenseAdded={fetchExpenses} allCategories={allCategories} />
+
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
@@ -185,7 +348,7 @@ export default function Expenses() {
             <div>
               <p className="text-sm text-muted-foreground">Total Expenses</p>
               <p className="text-2xl font-bold text-foreground">
-                ₹{totalExpenses.toLocaleString("en-IN")}
+                {format(totalExpenses)}
               </p>
             </div>
           </CardContent>
@@ -202,7 +365,7 @@ export default function Expenses() {
               </p>
               {highestCategory && (
                 <p className="text-sm text-muted-foreground">
-                  ₹{highestCategory[1].toLocaleString("en-IN")}
+                  {format(highestCategory[1])}
                 </p>
               )}
             </div>
@@ -240,9 +403,9 @@ export default function Expenses() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((cat) => (
-              <SelectItem key={cat} value={cat}>
-                {cat}
+            {allCategories.map((cat) => (
+              <SelectItem key={cat.id} value={cat.name}>
+                {cat.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -259,6 +422,7 @@ export default function Expenses() {
                 <TableHead>Category</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Notes</TableHead>
+                <TableHead className="w-[100px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -275,10 +439,32 @@ export default function Expenses() {
                     <Badge variant="secondary">{expense.category}</Badge>
                   </TableCell>
                   <TableCell className="font-medium">
-                    ₹{expense.amount.toLocaleString("en-IN")}
+                    {format(convert(expense.amount, expense.currency || "INR"))}
                   </TableCell>
                   <TableCell className="max-w-[200px] truncate text-muted-foreground">
                     {expense.notes}
+                  </TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEdit(expense)}>
+                          <Edit className="mr-2 h-4 w-4" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          className="text-destructive "
+                          onClick={() => handleDelete(expense.id)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}

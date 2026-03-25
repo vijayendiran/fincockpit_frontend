@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Search, Edit2, Trash2, Filter, CreditCard } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,10 +42,27 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { subscriptions as initialSubscriptions, categories, type Subscription } from "@/data/mockData";
+import { categories } from "@/contexts/data/mockData";
+import { useAuth } from "../contexts/AuthContext";
+import { useCurrency, CURRENCY_SYMBOLS } from "../hooks/useCurrency";
+
+export interface Subscription {
+  id: string;
+  name: string;
+  category: string;
+  amount: number;
+  currency?: string;
+  billingCycle: "monthly" | "yearly" | "weekly";
+  renewalDate: string;
+  status: "active" | "paused" | "cancelled";
+  notes?: string;
+}
 
 export default function Subscriptions() {
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>(initialSubscriptions);
+  const { token } = useAuth();
+  const { format, convert, symbol, currencies, baseCurrency } = useCurrency();
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [allCategories, setAllCategories] = useState<{ id: string, name: string }[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -56,6 +73,7 @@ export default function Subscriptions() {
     name: "",
     category: "",
     amount: "",
+    currency: baseCurrency,
     billingCycle: "monthly" as "monthly" | "yearly" | "weekly",
     startDate: "",
     notes: "",
@@ -71,33 +89,107 @@ export default function Subscriptions() {
   const totalMonthly = filteredSubscriptions
     .filter((sub) => sub.status === "active")
     .reduce((sum, sub) => {
-      if (sub.billingCycle === "yearly") return sum + sub.amount / 12;
-      if (sub.billingCycle === "weekly") return sum + sub.amount * 4;
-      return sum + sub.amount;
+      const convertedAmount = convert(sub.amount, sub.currency || "INR");
+      if (sub.billingCycle === "yearly") return sum + convertedAmount / 12;
+      if (sub.billingCycle === "weekly") return sum + convertedAmount * 4;
+      return sum + convertedAmount;
     }, 0);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingSub) {
-      setSubscriptions(subscriptions.map(sub => 
-        sub.id === editingSub.id
-          ? { ...sub, ...formData, amount: parseFloat(formData.amount) }
-          : sub
-      ));
-    } else {
-      const newSub: Subscription = {
-        id: Date.now().toString(),
-        name: formData.name,
-        category: formData.category,
-        amount: parseFloat(formData.amount),
-        billingCycle: formData.billingCycle,
-        renewalDate: formData.startDate,
-        status: "active",
-        notes: formData.notes,
-      };
-      setSubscriptions([...subscriptions, newSub]);
+  const fetchSubscriptions = async () => {
+    try {
+      const response = await fetch('/api/subscriptions', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await response.json();
+      if (json.success) {
+        setSubscriptions(json.data.subscriptions.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          category: s.category?.name || 'Other',
+          amount: s.amount,
+          currency: s.currency || 'INR',
+          billingCycle: s.billingCycle,
+          renewalDate: s.startDate || s.createdAt,
+          status: s.status,
+          notes: s.description
+        })));
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const response = await fetch('/api/categories?type=expense', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await response.json();
+      if (json.success) setAllCategories(json.data.categories);
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchSubscriptions();
+      fetchCategories();
     }
-    resetForm();
+  }, [token]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let matchedCat = allCategories.find(c => c.name === formData.category);
+    let categoryId = matchedCat?.id;
+
+    if (!categoryId) {
+      const catRes = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: formData.category, type: 'expense' })
+      });
+      const catJson = await catRes.json();
+      if (catJson.success) {
+        categoryId = catJson.data.category.id;
+        setAllCategories([...allCategories, catJson.data.category]);
+      } else {
+        alert("Failed to create category");
+        return;
+      }
+    }
+
+    const payload = {
+      name: formData.name,
+      amount: parseFloat(formData.amount),
+      currency: formData.currency,
+      billingCycle: formData.billingCycle,
+      startDate: formData.startDate,
+      categoryId: categoryId,
+      description: formData.notes
+    };
+
+    try {
+      if (editingSub) {
+        const res = await fetch(`/api/subscriptions/${editingSub.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload)
+        });
+        if ((await res.json()).success) {
+          fetchSubscriptions();
+          resetForm();
+        }
+      } else {
+        const res = await fetch('/api/subscriptions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload)
+        });
+        if ((await res.json()).success) {
+          fetchSubscriptions();
+          resetForm();
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const resetForm = () => {
@@ -105,6 +197,7 @@ export default function Subscriptions() {
       name: "",
       category: "",
       amount: "",
+      currency: baseCurrency,
       billingCycle: "monthly",
       startDate: "",
       notes: "",
@@ -119,6 +212,7 @@ export default function Subscriptions() {
       name: sub.name,
       category: sub.category,
       amount: sub.amount.toString(),
+      currency: sub.currency || baseCurrency,
       billingCycle: sub.billingCycle,
       startDate: sub.renewalDate,
       notes: sub.notes || "",
@@ -126,8 +220,18 @@ export default function Subscriptions() {
     setIsAddDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setSubscriptions(subscriptions.filter(sub => sub.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/subscriptions/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if ((await res.json()).success) {
+        setSubscriptions(subscriptions.filter(sub => sub.id !== id));
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -203,16 +307,36 @@ export default function Subscriptions() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="amount">Amount (₹)</Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  placeholder="0.00"
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  required
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="currency">Currency</Label>
+                  <Select
+                    value={formData.currency}
+                    onValueChange={(value) => setFormData({ ...formData, currency: value })}
+                  >
+                    <SelectTrigger id="currency">
+                      <SelectValue placeholder="Select currency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currencies.map((c: string) => (
+                        <SelectItem key={c} value={c}>
+                          {CURRENCY_SYMBOLS[c] || ""} {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount</Label>
+                  <Input
+                    id="amount"
+                    type="number"
+                    placeholder="0.00"
+                    value={formData.amount}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Billing Cycle</Label>
@@ -271,7 +395,7 @@ export default function Subscriptions() {
             <div>
               <p className="text-sm text-muted-foreground">Total Monthly Cost</p>
               <p className="text-2xl font-bold text-foreground">
-                ₹{Math.round(totalMonthly).toLocaleString("en-IN")}
+                {format(totalMonthly)}
               </p>
             </div>
           </div>
@@ -341,7 +465,7 @@ export default function Subscriptions() {
                   <TableCell>
                     <Badge variant="secondary">{sub.category}</Badge>
                   </TableCell>
-                  <TableCell>₹{sub.amount.toLocaleString("en-IN")}</TableCell>
+                  <TableCell>{format(convert(sub.amount, sub.currency || "INR"))}</TableCell>
                   <TableCell className="hidden capitalize sm:table-cell">
                     {sub.billingCycle}
                   </TableCell>

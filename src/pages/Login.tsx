@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import { Wallet, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +13,49 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { login, user } = useAuth();
+
+  // If already logged in, redirect to dashboard or intended page
+  useEffect(() => {
+    if (user) {
+      const from = location.state?.from?.pathname || "/dashboard";
+      navigate(from, { replace: true });
+    }
+  }, [user, navigate, location]);
+
+  if (user) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Handle login logic
-    console.log("Login:", { email, password });
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      let data;
+      const text = await response.text();
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (err) {
+        console.error("Failed to parse JSON response:", text);
+        throw new Error("Invalid response from server");
+      }
+
+      if (response.ok && data.success) {
+        // Backend returns accessToken in data.data.accessToken
+        login(data.data.accessToken, data.data.user);
+        const from = location.state?.from?.pathname || "/dashboard";
+        navigate(from, { replace: true });
+      } else {
+        alert(data.message || 'Login failed');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      alert('Network error. Please make sure the server is running.');
+    }
   };
 
   return (
@@ -29,6 +69,19 @@ export default function Login() {
           <CardDescription>
             Sign in to your FinCockpit account
           </CardDescription>
+
+          {location.search.includes('verified=true') && (
+            <div className="mt-4 rounded-md bg-green-50 p-3 text-sm text-green-600 border border-green-200">
+              Email verified successfully! You can now sign in.
+            </div>
+          )}
+          {location.search.includes('verified=false') && (
+            <div className="mt-4 rounded-md bg-destructive/15 p-3 text-sm text-destructive border border-destructive/20">
+              {location.search.includes('error=expired_token') 
+                ? 'Verification link has expired. Please sign up again.' 
+                : 'Email verification failed. Please try again or contact support.'}
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -77,8 +130,8 @@ export default function Login() {
                 Forgot password?
               </Link>
             </div>
-            <Button type="submit" className="w-full" asChild>
-              <Link to="/dashboard">Sign In</Link>
+            <Button type="submit" className="w-full">
+              Sign In
             </Button>
           </form>
 
