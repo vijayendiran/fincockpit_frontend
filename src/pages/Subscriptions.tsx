@@ -45,6 +45,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { categories } from "@/contexts/data/mockData";
 import { useAuth } from "../contexts/AuthContext";
 import { useCurrency, CURRENCY_SYMBOLS } from "../hooks/useCurrency";
+import axios from "../lib/axios";
 
 export interface Subscription {
   id: string;
@@ -97,10 +98,8 @@ export default function Subscriptions() {
 
   const fetchSubscriptions = async () => {
     try {
-      const response = await fetch('/api/subscriptions', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const json = await response.json();
+      const response = await axios.get('/api/subscriptions');
+      const json = response.data;
       if (json.success) {
         setSubscriptions(json.data.subscriptions.map((s: any) => ({
           id: s.id,
@@ -119,10 +118,8 @@ export default function Subscriptions() {
 
   const fetchCategories = async () => {
     try {
-      const response = await fetch('/api/categories?type=expense', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const json = await response.json();
+      const response = await axios.get('/api/categories?type=expense');
+      const json = response.data;
       if (json.success) setAllCategories(json.data.categories);
     } catch (e) { console.error(e); }
   };
@@ -140,16 +137,21 @@ export default function Subscriptions() {
     let categoryId = matchedCat?.id;
 
     if (!categoryId) {
-      const catRes = await fetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: formData.category, type: 'expense' })
-      });
-      const catJson = await catRes.json();
-      if (catJson.success) {
-        categoryId = catJson.data.category.id;
-        setAllCategories([...allCategories, catJson.data.category]);
-      } else {
+      try {
+        const catRes = await axios.post('/api/categories', {
+          name: formData.category,
+          type: 'expense'
+        });
+        const catJson = catRes.data;
+        if (catJson.success) {
+          categoryId = catJson.data.category.id;
+          setAllCategories([...allCategories, catJson.data.category]);
+        } else {
+          alert("Failed to create category");
+          return;
+        }
+      } catch (err) {
+        console.error(err);
         alert("Failed to create category");
         return;
       }
@@ -167,22 +169,14 @@ export default function Subscriptions() {
 
     try {
       if (editingSub) {
-        const res = await fetch(`/api/subscriptions/${editingSub.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(payload)
-        });
-        if ((await res.json()).success) {
+        const res = await axios.put(`/api/subscriptions/${editingSub.id}`, payload);
+        if (res.data.success) {
           fetchSubscriptions();
           resetForm();
         }
       } else {
-        const res = await fetch('/api/subscriptions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(payload)
-        });
-        if ((await res.json()).success) {
+        const res = await axios.post('/api/subscriptions', payload);
+        if (res.data.success) {
           fetchSubscriptions();
           resetForm();
         }
@@ -222,11 +216,8 @@ export default function Subscriptions() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/subscriptions/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if ((await res.json()).success) {
+      const res = await axios.delete(`/api/subscriptions/${id}`);
+      if (res.data.success) {
         setSubscriptions(subscriptions.filter(sub => sub.id !== id));
       }
     } catch (err) {

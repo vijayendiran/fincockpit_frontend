@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "../contexts/AuthContext";
 import { useCurrency } from "../hooks/useCurrency";
+import axios from "../lib/axios";
 
 export default function Analytics() {
   const { token, user } = useAuth();
@@ -32,18 +33,17 @@ export default function Analytics() {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const headers = { Authorization: `Bearer ${token}` };
         const [summaryRes, trendRes, categoryRes, subAnalysisRes] = await Promise.all([
-          fetch('/api/analytics/summary', { headers }),
-          fetch('/api/analytics/monthly-trend', { headers }),
-          fetch('/api/analytics/expenses-by-category', { headers }),
-          fetch('/api/analytics/subscription-analysis', { headers }),
+          axios.get('/api/analytics/summary'),
+          axios.get('/api/analytics/monthly-trend'),
+          axios.get('/api/analytics/expenses-by-category'),
+          axios.get('/api/analytics/subscription-analysis'),
         ]);
 
-        const summaryJson = await summaryRes.json();
-        const trendJson = await trendRes.json();
-        const categoryJson = await categoryRes.json();
-        const subAnalysisJson = await subAnalysisRes.json();
+        const summaryJson = summaryRes.data;
+        const trendJson = trendRes.data;
+        const categoryJson = categoryRes.data;
+        const subAnalysisJson = subAnalysisRes.data;
 
         if (summaryJson.success) {
           const totalMonthlySpend = summaryJson.data.totalExpenses + summaryJson.data.monthlySubscriptionCost;

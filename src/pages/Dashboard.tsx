@@ -19,6 +19,7 @@ import { AnomalyCard } from "../components/AnomalyCard";
 import { SavingsSuggestions } from "../components/SavingsSuggestions";
 import { ForecastCard } from "../components/ForecastCard";
 import { NLPExpenseInput } from "../components/NLPExpenseInput";
+import axios from "../lib/axios";
 
 interface Subscription {
   id: string;
@@ -52,21 +53,19 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-
       const [summaryRes, trendRes, categoryRes, subsRes, allCatsRes] = await Promise.all([
-        fetch('/api/analytics/summary', { headers }),
-        fetch('/api/analytics/monthly-trend', { headers }),
-        fetch('/api/analytics/expenses-by-category', { headers }),
-        fetch('/api/subscriptions', { headers }),
-        fetch('/api/categories', { headers })
+        axios.get('/api/analytics/summary'),
+        axios.get('/api/analytics/monthly-trend'),
+        axios.get('/api/analytics/expenses-by-category'),
+        axios.get('/api/subscriptions'),
+        axios.get('/api/categories')
       ]);
 
-      const summaryJson = await summaryRes.json();
-      const trendJson = await trendRes.json();
-      const categoryJson = await categoryRes.json();
-      const subsJson = await subsRes.json();
-      const allCatsJson = await allCatsRes.json();
+      const summaryJson = summaryRes.data;
+      const trendJson = trendRes.data;
+      const categoryJson = categoryRes.data;
+      const subsJson = subsRes.data;
+      const allCatsJson = allCatsRes.data;
 
       if (summaryJson.success) {
         const totalMonthlySpend = summaryJson.data.totalExpenses + summaryJson.data.monthlySubscriptionCost;

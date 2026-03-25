@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "../contexts/AuthContext";
 import { useCurrency, CURRENCY_SYMBOLS } from "../hooks/useCurrency";
+import axios from "../lib/axios";
 
 export interface Expense {
   id: string;
@@ -94,10 +95,8 @@ export default function Expenses() {
 
   const fetchExpenses = async () => {
     try {
-      const response = await fetch('/api/expenses', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const json = await response.json();
+      const response = await axios.get('/api/expenses');
+      const json = response.data;
       if (json.success) {
         setExpenses(json.data.expenses.map((e: any) => ({
           id: e.id,
@@ -113,10 +112,8 @@ export default function Expenses() {
 
   const fetchCategories = async () => {
     try {
-      const response = await fetch('/api/categories?type=expense', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const json = await response.json();
+      const response = await axios.get('/api/categories?type=expense');
+      const json = response.data;
       if (json.success) setAllCategories(json.data.categories);
     } catch (e) { console.error(e); }
   };
@@ -136,19 +133,21 @@ export default function Expenses() {
     let categoryId = matchedCat?.id;
 
     if (!categoryId) {
-      const catRes = await fetch('/api/categories', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ name: formData.category, type: 'expense' })
-      });
-      const catJson = await catRes.json();
-      if (catJson.success) {
-        categoryId = catJson.data.category.id;
-        setAllCategories([...allCategories, catJson.data.category]);
-      } else {
+      try {
+        const catRes = await axios.post('/api/categories', {
+          name: formData.category,
+          type: 'expense'
+        });
+        const catJson = catRes.data;
+        if (catJson.success) {
+          categoryId = catJson.data.category.id;
+          setAllCategories([...allCategories, catJson.data.category]);
+        } else {
+          alert("Failed to create category");
+          return;
+        }
+      } catch (err) {
+        console.error(err);
         alert("Failed to create category");
         return;
       }
@@ -156,25 +155,20 @@ export default function Expenses() {
 
     try {
       const url = editingExpenseId ? `/api/expenses/${editingExpenseId}` : '/api/expenses';
-      const method = editingExpenseId ? 'PUT' : 'POST';
+      const payload = {
+        title: formData.notes || 'Expense',
+        description: formData.notes,
+        amount: parseFloat(formData.amount),
+        categoryId: categoryId,
+        date: formData.date,
+        currency: formData.currency
+      };
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          title: formData.notes || 'Expense',
-          description: formData.notes,
-          amount: parseFloat(formData.amount),
-          categoryId: categoryId,
-          date: formData.date,
-          currency: formData.currency
-        })
-      });
+      const response = editingExpenseId 
+        ? await axios.put(url, payload)
+        : await axios.post(url, payload);
 
-      const json = await response.json();
+      const json = response.data;
       if (json.success) {
         fetchExpenses();
         resetForm();
@@ -206,11 +200,8 @@ export default function Expenses() {
     if (!confirm("Are you sure you want to delete this expense?")) return;
 
     try {
-      const response = await fetch(`/api/expenses/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const json = await response.json();
+      const response = await axios.delete(`/api/expenses/${id}`);
+      const json = response.data;
       if (json.success) {
         setExpenses(expenses.filter(e => e.id !== id));
       } else {
