@@ -30,7 +30,7 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
       const response = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

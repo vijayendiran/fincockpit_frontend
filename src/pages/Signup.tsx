@@ -45,7 +45,7 @@ export default function Signup() {
     }
     
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
       const response = await fetch(`${baseUrl}/api/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

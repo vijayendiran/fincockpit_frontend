@@ -43,7 +43,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
 
         try {
-            const baseUrl = import.meta.env.VITE_API_URL || '';
+            const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
             const response = await fetch(`${baseUrl}/api/auth/me`, {
                 headers: {
                     'Authorization': `Bearer ${storedToken}`
@@ -95,7 +95,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const updateUser = async (data: Partial<User>) => {
         if (!token) return false;
         try {
-            const baseUrl = import.meta.env.VITE_API_URL || '';
+            const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
             const response = await fetch(`${baseUrl}/api/auth/update`, {
                 method: 'PUT',
                 headers: {
